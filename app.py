@@ -1,12 +1,16 @@
+
 import sqlite3
+from datetime import date, datetime
 from pathlib import Path
-from datetime import date
-from finance_tracker import render_finance
+
 import streamlit as st
+
 from proposal_studio import render_proposal_studio
+from finance_tracker import render_finance
+
 
 # --------------------------------------------------
-# CreatorDesk: a simple freelance business manager
+# APP CONFIGURATION
 # --------------------------------------------------
 
 APP_DIR = Path(__file__).resolve().parent
@@ -14,139 +18,24 @@ DB_PATH = APP_DIR / "creatordesk.db"
 
 st.set_page_config(
     page_title="CreatorDesk",
-    page_icon="💼",
+    page_icon="🚀",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# CreatorDesk professional theme
-st.markdown("""
-<style>
-    :root {
-        --cd-primary: #6366f1;
-        --cd-primary-hover: #4f46e5;
-        --cd-bg: #f5f7fb;
-        --cd-text: #111827;
-        --cd-muted: #6b7280;
-        --cd-border: #e5e7eb;
-    }
 
-    .stApp {
-        background: var(--cd-bg);
-        color: var(--cd-text);
-    }
-
-    [data-testid="stHeader"] {
-        background: rgba(245, 247, 251, 0.92);
-    }
-
-    [data-testid="stSidebar"] {
-        background: #111827;
-        border-right: 1px solid #273244;
-    }
-
-    [data-testid="stSidebar"] * {
-        color: #e5e7eb;
-    }
-
-    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
-        color: #cbd5e1;
-    }
-
-    [data-testid="stSidebar"] [role="radiogroup"] label {
-        border-radius: 9px;
-        padding: 7px 10px;
-        transition: background 0.15s ease;
-    }
-
-    [data-testid="stSidebar"] [role="radiogroup"] label:hover {
-        background: #273244;
-    }
-
-    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
-        color: #9ca3af;
-    }
-
-    h1, h2, h3 {
-        color: var(--cd-text);
-        letter-spacing: -0.025em;
-    }
-
-    [data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid var(--cd-border);
-        border-radius: 14px;
-        padding: 18px 20px;
-        box-shadow: 0 2px 5px rgba(15, 23, 42, 0.03);
-    }
-
-    [data-testid="stMetricLabel"] {
-        color: var(--cd-muted);
-    }
-
-    [data-testid="stMetricValue"] {
-        color: var(--cd-text);
-        font-weight: 700;
-    }
-
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        border-color: var(--cd-border);
-        border-radius: 14px;
-    }
-
-    .stButton > button,
-    .stFormSubmitButton > button {
-        background: var(--cd-primary);
-        color: #ffffff;
-        border: 1px solid var(--cd-primary);
-        border-radius: 9px;
-        font-weight: 600;
-        min-height: 40px;
-        transition: background 0.15s ease;
-    }
-
-    .stButton > button:hover,
-    .stFormSubmitButton > button:hover {
-        background: var(--cd-primary-hover);
-        color: #ffffff;
-        border-color: var(--cd-primary-hover);
-    }
-
-    .stTextInput input,
-    .stNumberInput input,
-    .stDateInput input,
-    .stSelectbox [data-baseweb="select"] {
-        border-radius: 9px;
-    }
-
-    [data-testid="stAlert"] {
-        border-radius: 10px;
-    }
-
-    #MainMenu {
-        visibility: hidden;
-    }
-
-    footer {
-        visibility: hidden;
-    }
-
-    @media (max-width: 768px) {
-        [data-testid="stMetric"] {
-            padding: 12px;
-        }
-    }
-</style>
-""", unsafe_allow_html=True)
-
-
-# -------------------- DATABASE --------------------
+# --------------------------------------------------
+# DATABASE
+# --------------------------------------------------
 
 def connect_db():
-    return sqlite3.connect(DB_PATH)
+    return sqlite3.connect(str(DB_PATH), timeout=10)
 
 
-def initialize_database():
+def initialize_db():
     with connect_db() as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS clients (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,67 +51,64 @@ def initialize_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 client_id INTEGER NOT NULL,
                 title TEXT NOT NULL,
-                fee REAL NOT NULL DEFAULT 0,
+                fee REAL DEFAULT 0,
                 due_date TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'Not started',
-                payment_status TEXT NOT NULL DEFAULT 'Unpaid',
+                status TEXT DEFAULT 'Not started',
+                payment_status TEXT DEFAULT 'Unpaid',
                 created_at TEXT NOT NULL,
-                FOREIGN KEY (client_id) REFERENCES clients(id)
+                FOREIGN KEY(client_id) REFERENCES clients(id)
             )
         """)
 
+        # Store the business profile without modifying
+        # the existing clients or projects tables.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT NOT NULL DEFAULT ''
+            )
+        """)
 
-def add_client(name, contact, service):
+        conn.execute("""
+            INSERT OR IGNORE INTO app_settings
+                (setting_key, setting_value)
+            VALUES ('business_name', '')
+        """)
+
+
+def get_business_name():
     with connect_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO clients
-                (name, contact, service, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                name.strip(),
-                contact.strip(),
-                service.strip(),
-                date.today().isoformat(),
-            ),
-        )
+        row = conn.execute("""
+            SELECT setting_value
+            FROM app_settings
+            WHERE setting_key = 'business_name'
+        """).fetchone()
+
+    return row[0] if row else ""
+
+
+def save_business_name(name):
+    with connect_db() as conn:
+        conn.execute("""
+            INSERT INTO app_settings (setting_key, setting_value)
+            VALUES ('business_name', ?)
+            ON CONFLICT(setting_key)
+            DO UPDATE SET setting_value = excluded.setting_value
+        """, (name.strip(),))
 
 
 def get_clients():
     with connect_db() as conn:
-        return conn.execute(
-            """
-            SELECT id, name, contact, service
+        return conn.execute("""
+            SELECT id, name, contact, service, created_at
             FROM clients
-            ORDER BY name COLLATE NOCASE
-            """
-        ).fetchall()
-
-
-def add_project(client_id, title, fee, due_date):
-    with connect_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO projects
-                (client_id, title, fee, due_date, status,
-                 payment_status, created_at)
-            VALUES (?, ?, ?, ?, 'Not started', 'Unpaid', ?)
-            """,
-            (
-                client_id,
-                title.strip(),
-                fee,
-                due_date.isoformat(),
-                date.today().isoformat(),
-            ),
-        )
+            ORDER BY id DESC
+        """).fetchall()
 
 
 def get_projects():
     with connect_db() as conn:
-        return conn.execute(
-            """
+        return conn.execute("""
             SELECT
                 p.id,
                 c.name,
@@ -230,247 +116,418 @@ def get_projects():
                 p.fee,
                 p.due_date,
                 p.status,
-                p.payment_status
-            FROM projects AS p
-            JOIN clients AS c ON c.id = p.client_id
-            ORDER BY p.due_date, p.id DESC
-            """
-        ).fetchall()
+                p.payment_status,
+                p.created_at
+            FROM projects p
+            JOIN clients c ON c.id = p.client_id
+            ORDER BY p.id DESC
+        """).fetchall()
 
 
-def update_project(project_id, status, payment_status):
+def add_client(name, contact, service):
+    if not name.strip():
+        raise ValueError("Client name is required.")
+
     with connect_db() as conn:
-        conn.execute(
-            """
-            UPDATE projects
-            SET status = ?, payment_status = ?
-            WHERE id = ?
-            """,
-            (status, payment_status, project_id),
-        )
+        conn.execute("""
+            INSERT INTO clients
+                (name, contact, service, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (
+            name.strip(),
+            contact.strip(),
+            service.strip(),
+            datetime.now().isoformat(timespec="seconds"),
+        ))
 
 
-# -------------------- STARTUP --------------------
+def add_project(client_id, title, fee, due_date):
+    if not title.strip():
+        raise ValueError("Project title is required.")
 
-initialize_database()
+    if fee < 0:
+        raise ValueError("Project fee cannot be negative.")
 
-st.title("💼 CreatorDesk")
-st.caption("Your freelance work, organised in one place.")
-
-page = st.sidebar.radio(
-    "Navigate",
-    [
-        "Dashboard",
-        "Clients",
-        "Projects",
-        "Add Client",
-        "Add Project",
-        "Proposal Studio",
-        "Finance centre",
-    ],
-)
-
-clients = get_clients()
-projects = get_projects()
-
-
-# -------------------- DASHBOARD --------------------
-
-if page == "Dashboard":
-    st.subheader("Your business at a glance")
-
-    total_clients = len(clients)
-    active_projects = sum(
-        1 for p in projects
-        if p[5] != "Completed"
-    )
-    unpaid_amount = sum(
-        p[3] for p in projects
-        if p[6] != "Paid"
-    )
-    completed_projects = sum(
-        1 for p in projects
-        if p[5] == "Completed"
-    )
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("Total clients", total_clients)
-    col2.metric("Active projects", active_projects)
-    col3.metric("Completed projects", completed_projects)
-    col4.metric("Outstanding fees", f"₹{unpaid_amount:,.2f}")
-
-    st.divider()
-    st.subheader("Upcoming deadlines")
-
-    upcoming = [
-        p for p in projects
-        if p[5] != "Completed"
-    ]
-    upcoming.sort(key=lambda p: p[4])
-
-    if upcoming:
-        for p in upcoming[:5]:
-            with st.container(border=True):
-                st.write(f"**{p[2]}** — {p[1]}")
-                st.caption(
-                    f"Due: {p[4]} | Status: {p[5]} "
-                    f"| Payment: {p[6]} | Fee: ₹{p[3]:,.2f}"
+    with connect_db() as conn:
+        conn.execute("""
+            INSERT INTO projects
+                (
+                    client_id, title, fee, due_date,
+                    status, payment_status, created_at
                 )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            client_id,
+            title.strip(),
+            fee,
+            due_date.isoformat(),
+            "Not started",
+            "Unpaid",
+            datetime.now().isoformat(timespec="seconds"),
+        ))
+
+
+# --------------------------------------------------
+# STYLING
+# --------------------------------------------------
+
+st.markdown("""
+<style>
+    .block-container {
+        padding-top: 1.8rem;
+        padding-bottom: 2rem;
+    }
+
+    [data-testid="stMetric"] {
+        background: var(--secondary-background-color);
+        padding: 16px;
+        border-radius: 12px;
+        border: 1px solid rgba(128, 128, 128, 0.18);
+    }
+
+    div.stButton > button {
+        border-radius: 8px;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
+# --------------------------------------------------
+# DASHBOARD
+# --------------------------------------------------
+
+def render_dashboard():
+    clients = get_clients()
+    projects = get_projects()
+    business_name = get_business_name()
+
+    if business_name:
+        st.title(f"Welcome to {business_name} 👋")
     else:
-        st.info("No projects yet. Add your first client and project!")
+        st.title("Welcome to CreatorDesk 👋")
 
     st.caption(
-        "Outstanding fees are based on unpaid project fees, "
-        "not verified bank transactions."
+        "Your workspace for managing clients, projects, "
+        "proposals, and business finances."
+    )
+
+    # Clearly labelled business-name field.
+    with st.expander("⚙️ Business Profile", expanded=not business_name):
+        st.subheader("Personalise your workspace")
+
+        with st.form("business_profile_form"):
+            entered_name = st.text_input(
+                "Your name or business name",
+                value=business_name,
+                placeholder="e.g. CreatorDesk Studio",
+                help="This name appears in your dashboard greeting.",
+                max_chars=100,
+            )
+
+            save_profile = st.form_submit_button(
+                "Save Business Profile",
+                type="primary",
+            )
+
+            if save_profile:
+                if not entered_name.strip():
+                    st.error("Please enter a name before saving.")
+                else:
+                    save_business_name(entered_name)
+                    st.success("Business profile saved!")
+                    st.rerun()
+
+    total_projects = len(projects)
+    active_projects = sum(
+        1 for project in projects
+        if project[5] not in ("Completed", "Cancelled")
+    )
+    completed_projects = sum(
+        1 for project in projects
+        if project[5] == "Completed"
+    )
+    total_project_value = sum(
+        float(project[3] or 0) for project in projects
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric("Total Clients", len(clients))
+    c2.metric("Total Projects", total_projects)
+    c3.metric("Active Projects", active_projects)
+    c4.metric("Completed Projects", completed_projects)
+
+    st.divider()
+
+    left, right = st.columns(2)
+
+    with left:
+        st.subheader("📊 Business Overview")
+        st.metric("Total Project Value", f"₹{total_project_value:,.2f}")
+        st.caption(
+            "This is the sum of recorded project fees, "
+            "not actual revenue received."
+        )
+
+    with right:
+        st.subheader("🚀 Recent Projects")
+
+        if projects:
+            st.dataframe(
+                [
+                    {
+                        "Client": p[1],
+                        "Project": p[2],
+                        "Due Date": p[4],
+                        "Status": p[5],
+                    }
+                    for p in projects[:5]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info(
+                "No projects yet. Start by adding a client "
+                "and creating your first project."
+            )
+
+
+# --------------------------------------------------
+# CLIENTS
+# --------------------------------------------------
+
+def render_clients():
+    st.title("👥 Clients")
+    st.caption("View your existing client records.")
+
+    clients = get_clients()
+
+    if not clients:
+        st.info("No clients added yet. Use Add Client to get started.")
+        return
+
+    search = st.text_input(
+        "Search clients",
+        placeholder="Search by name, contact, or service...",
+    )
+
+    filtered = [
+        c for c in clients
+        if search.strip().casefold() in " ".join(
+            str(value or "") for value in c[1:4]
+        ).casefold()
+    ]
+
+    st.caption(f"{len(filtered)} client(s) found")
+
+    st.dataframe(
+        [
+            {
+                "ID": c[0],
+                "Client Name": c[1],
+                "Contact": c[2],
+                "Service": c[3],
+                "Created": c[4],
+            }
+            for c in filtered
+        ],
+        use_container_width=True,
+        hide_index=True,
     )
 
 
-# -------------------- CLIENTS --------------------
+# --------------------------------------------------
+# ADD CLIENT
+# --------------------------------------------------
 
-elif page == "Clients":
-    st.subheader("Your clients")
-
-    if clients:
-        for client_id, name, contact, service in clients:
-            with st.container(border=True):
-                st.write(f"**{name}**")
-                st.write(f"Contact: {contact or 'Not provided'}")
-                st.write(f"Service: {service or 'Not specified'}")
-    else:
-        st.info("No clients yet. Open Add Client to get started.")
-
-
-# -------------------- PROJECTS --------------------
-
-elif page == "Projects":
-    st.subheader("Manage your projects")
-
-    if not projects:
-        st.info("No projects yet. Add a client, then create a project.")
-
-    for p in projects:
-        project_id, client_name, title, fee, due_date, status, payment = p
-
-        with st.container(border=True):
-            st.write(f"### {title}")
-            st.write(f"**Client:** {client_name}")
-            st.write(f"**Fee:** ₹{fee:,.2f}")
-            st.write(f"**Deadline:** {due_date}")
-
-            with st.form(key=f"project_form_{project_id}"):
-                new_status = st.selectbox(
-                    "Project status",
-                    ["Not started", "In progress", "Completed"],
-                    index=[
-                        "Not started",
-                        "In progress",
-                        "Completed",
-                    ].index(status),
-                    key=f"status_{project_id}",
-                )
-
-                new_payment = st.selectbox(
-                    "Payment status",
-                    ["Unpaid", "Partially paid", "Paid"],
-                    index=[
-                        "Unpaid",
-                        "Partially paid",
-                        "Paid",
-                    ].index(payment),
-                    key=f"payment_{project_id}",
-                )
-
-                submitted = st.form_submit_button("Save changes")
-
-                if submitted:
-                    update_project(
-                        project_id,
-                        new_status,
-                        new_payment,
-                    )
-                    st.success("Project updated.")
-                    st.rerun()
-
-
-# -------------------- ADD CLIENT --------------------
-
-elif page == "Add Client":
-    st.subheader("Add a new client")
+def render_add_client():
+    st.title("➕ Add Client")
+    st.caption("Create a new client record.")
 
     with st.form("add_client_form", clear_on_submit=True):
-        name = st.text_input("Client or business name *")
-        contact = st.text_input("Contact details (optional)")
+        name = st.text_input(
+            "Client name *",
+            placeholder="Enter client or company name",
+        )
+        contact = st.text_input(
+            "Contact information",
+            placeholder="Email or phone (optional)",
+        )
         service = st.text_input(
-            "What service do they need? (optional)"
+            "Service required",
+            placeholder="e.g. Website design",
         )
 
-        submitted = st.form_submit_button("Save client")
+        submitted = st.form_submit_button(
+            "Save Client",
+            type="primary",
+        )
 
         if submitted:
             if not name.strip():
-                st.error("Please enter a client name.")
+                st.error("Please enter the client name.")
             else:
                 add_client(name, contact, service)
-                st.success(f"Client '{name.strip()}' saved!")
+                st.success(f"Client '{name.strip()}' added successfully!")
                 st.rerun()
 
 
-# -------------------- ADD PROJECT --------------------
+# --------------------------------------------------
+# PROJECTS
+# --------------------------------------------------
 
-elif page == "Add Project":
-    st.subheader("Create a project")
+def render_projects():
+    st.title("📁 Projects")
+    st.caption("Track projects and their current status.")
+
+    projects = get_projects()
+
+    if not projects:
+        st.info("No projects yet. Add a client, then create a project.")
+        return
+
+    search = st.text_input(
+        "Search projects",
+        placeholder="Search by client, project, or status...",
+    )
+
+    filtered = [
+        p for p in projects
+        if search.strip().casefold() in " ".join(
+            str(value or "") for value in (p[1], p[2], p[5], p[6])
+        ).casefold()
+    ]
+
+    st.dataframe(
+        [
+            {
+                "ID": p[0],
+                "Client": p[1],
+                "Project": p[2],
+                "Fee (₹)": p[3],
+                "Due Date": p[4],
+                "Status": p[5],
+                "Payment Status": p[6],
+            }
+            for p in filtered
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+# --------------------------------------------------
+# ADD PROJECT
+# --------------------------------------------------
+
+def render_add_project():
+    st.title("➕ Add Project")
+    st.caption("Create a project and link it to a client.")
+
+    clients = get_clients()
 
     if not clients:
         st.warning("Add a client before creating a project.")
-        st.info("Open Add Client in the sidebar first.")
-    else:
-        client_options = {
-            f"{c[1]} (Client #{c[0]})": c[0]
-            for c in clients
-        }
+        st.info("Open the Add Client page first.")
+        return
 
-        with st.form("add_project_form", clear_on_submit=True):
-            selected_client = st.selectbox(
-                "Choose client",
-                list(client_options.keys()),
-            )
+    client_options = {
+        f"{client[1]} (#{client[0]})": client[0]
+        for client in clients
+    }
 
-            title = st.text_input("Project title *")
+    with st.form("add_project_form", clear_on_submit=True):
+        selected_client = st.selectbox(
+            "Select client",
+            list(client_options.keys()),
+        )
 
-            fee = st.number_input(
-                "Agreed project fee (₹)",
-                min_value=0.0,
-                value=500.0,
-                step=100.0,
-            )
+        title = st.text_input(
+            "Project title *",
+            placeholder="e.g. Portfolio website",
+        )
 
-            due_date = st.date_input(
-                "Project deadline",
-                value=date.today(),
-            )
+        fee = st.number_input(
+            "Agreed project fee (₹)",
+            min_value=0.0,
+            value=0.0,
+            step=500.0,
+        )
 
-            submitted = st.form_submit_button("Create project")
+        due_date = st.date_input(
+            "Project due date",
+            value=date.today(),
+            min_value=date.today(),
+        )
 
-            if submitted:
-                if not title.strip():
-                    st.error("Please enter a project title.")
-                else:
-                    add_project(
-                        client_options[selected_client],
-                        title,
-                        fee,
-                        due_date,
-                    )
-                    st.success(f"Project '{title.strip()}' created!")
-                    st.rerun()
-elif page == "Proposal Studio":
-     render_proposal_studio(DB_PATH)
+        submitted = st.form_submit_button(
+            "Create Project",
+            type="primary",
+        )
 
-elif page == "Finance Centre":
-    render_finance(DB_PATH)
-# -------------------- FOOTER --------------------
+        if submitted:
+            if not title.strip():
+                st.error("Please enter a project title.")
+            else:
+                add_project(
+                    client_options[selected_client],
+                    title,
+                    fee,
+                    due_date,
+                )
+                st.success(f"Project '{title.strip()}' created!")
+                st.rerun()
 
-st.sidebar.divider()
-st.sidebar.caption("CreatorDesk MVP • Local database")
-st.sidebar.caption("Built with Python + Streamlit")
+
+# --------------------------------------------------
+# MAIN NAVIGATION
+# --------------------------------------------------
+
+def main():
+    initialize_db()
+
+    st.sidebar.title("🚀 CreatorDesk")
+    st.sidebar.caption("Your business workspace")
+
+    page = st.sidebar.radio(
+        "Navigation",
+        [
+            "Dashboard",
+            "Clients",
+            "Projects",
+            "Add Client",
+            "Add Project",
+            "Proposal Studio",
+            "Finance Centre",
+        ],
+    )
+
+    st.sidebar.divider()
+    st.sidebar.caption("CreatorDesk · Business workspace")
+
+    if page == "Dashboard":
+        render_dashboard()
+
+    elif page == "Clients":
+        render_clients()
+
+    elif page == "Projects":
+        render_projects()
+
+    elif page == "Add Client":
+        render_add_client()
+
+    elif page == "Add Project":
+        render_add_project()
+
+    elif page == "Proposal Studio":
+        render_proposal_studio(DB_PATH)
+
+    elif page == "Finance Centre":
+        render_finance(DB_PATH)
+
+
+if __name__ == "__main__":
+    main()
