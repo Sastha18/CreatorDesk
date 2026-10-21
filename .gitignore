@@ -1,0 +1,20 @@
+
+# Python virtual environments
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Local databases — keep private data off GitHub
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets and environment variables
+.env
+.streamlit/secrets.toml
+
+# Local IDE settings
+.idea/
